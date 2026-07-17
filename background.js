@@ -7,6 +7,11 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Download folder structure from Vibe PowerApps',
     contexts: ['action']
   });
+  chrome.contextMenus.create({
+    id: 'downloadAll',
+    title: 'Download all files as ZIP',
+    contexts: ['action']
+  });
 });
 
 // Handle keyboard shortcuts
@@ -17,6 +22,8 @@ chrome.commands.onCommand.addListener(async (command) => {
     await downloadFile(tab);
   } else if (command === 'download-tree') {
     await downloadTree(tab);
+  } else if (command === 'download-all') {
+    await downloadAllFiles(tab);
   }
 });
 
@@ -24,6 +31,8 @@ chrome.commands.onCommand.addListener(async (command) => {
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'downloadTree') {
     await downloadTree(tab);
+  } else if (info.menuItemId === 'downloadAll') {
+    await downloadAllFiles(tab);
   }
 });
 
@@ -130,5 +139,68 @@ async function downloadTree(tab) {
     }
   } catch (error) {
     console.error('Error downloading tree:', error);
+  }
+}
+
+// Inject content script with JSZip for full downloads
+async function injectScriptForAll(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['lib/jszip.min.js', 'content.js']
+    });
+  } catch (e) {
+    // Scripts already injected, ignore
+  }
+  await new Promise(resolve => setTimeout(resolve, 100));
+}
+
+// Handle messages from content script (Monaco bridge)
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'getMonacoContent') {
+    chrome.scripting.executeScript({
+      target: { tabId: sender.tab.id },
+      world: 'MAIN',
+      func: () => {
+        const debug = {};
+        try {
+          debug.hasMonaco = typeof window.monaco !== 'undefined';
+          debug.hasEditor = debug.hasMonaco && typeof window.monaco.editor !== 'undefined';
+          if (debug.hasEditor) {
+            const models = window.monaco.editor.getModels();
+            debug.modelCount = models ? models.length : 0;
+            if (models && models.length > 0) {
+              const content = models[0].getValue();
+              debug.contentLen = content ? content.length : 0;
+              return { content, debug };
+            }
+          }
+        } catch (e) {
+          debug.error = e.message;
+        }
+        return { content: null, debug };
+      }
+    }).then(results => {
+      const result = results?.[0]?.result;
+      sendResponse({ content: result?.content || null, debug: result?.debug || null });
+    }).catch(err => {
+      sendResponse({ content: null, error: err.message });
+    });
+    return true;
+  }
+});
+
+// Download all files as ZIP
+async function downloadAllFiles(tab) {
+  try {
+    console.log('[Vibe Extension BG] Starting full project download...');
+    await injectScriptForAll(tab.id);
+
+    console.log('[Vibe Extension BG] Sending downloadAll message...');
+    const response = await chrome.tabs.sendMessage(tab.id, { action: 'downloadAll' });
+
+    console.log('[Vibe Extension BG] Download all result:', response);
+  } catch (error) {
+    console.error('[Vibe Extension BG] Error downloading all files:', error);
   }
 }

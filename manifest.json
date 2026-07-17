@@ -30,6 +30,13 @@
         "mac": "Command+Shift+T"
       },
       "description": "Download folder structure"
+    },
+    "download-all": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+A",
+        "mac": "Command+Shift+A"
+      },
+      "description": "Download all files as ZIP"
     }
   },
   "icons": {
